@@ -16,5 +16,13 @@ Pod::Spec.new do |s|
   s.source_files = "ios/**/*.{h,m,mm,swift,cpp}"
   s.private_header_files = "ios/**/*.h"
 
+  # Mixed Swift / Objective-C++ module. DEFINES_MODULE makes CocoaPods emit the
+  # generated `ExpoFontFallback-Swift.h` umbrella that ExpoFontFallback.mm imports.
+  s.swift_version = "5.0"
+  s.pod_target_xcconfig = {
+    "DEFINES_MODULE" => "YES",
+    "CLANG_CXX_LANGUAGE_STANDARD" => "c++20"
+  }
+
   install_modules_dependencies(s)
 end
