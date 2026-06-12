@@ -1,4 +1,5 @@
 import NativeExpoFontFallback from './NativeExpoFontFallback';
+import { installDefaultFontPatch } from './defaultFontPatch';
 import type {
   InstallOptions,
   FontFallbackConfig,
@@ -29,10 +30,23 @@ export const FontFallback = {
    * Safe to call more than once; subsequent calls re-apply the configuration.
    */
   install(options: InstallOptions = {}): boolean {
-    return NativeExpoFontFallback.install(
+    const ok = NativeExpoFontFallback.install(
       options.warnOnMissingGlyphs ?? false,
-      options.logResolvedFonts ?? false
+      options.logResolvedFonts ?? false,
+      options.defaultFamily ?? ''
     );
+
+    // Apply the configured default family to bare `<Text>` at the JS layer. This
+    // is what makes the app-wide default work on Android (whose attribute-less
+    // text path can't be redirected from native); on iOS it complements the
+    // native resolver. The runtime override wins over the embedded value.
+    const defaultFamily =
+      options.defaultFamily && options.defaultFamily.length > 0
+        ? options.defaultFamily
+        : this.getConfig().defaultFamily;
+    installDefaultFontPatch(defaultFamily);
+
+    return ok;
   },
 
   isInstalled(): boolean {

@@ -31,7 +31,16 @@ export const withFontFallbackAndroid: ConfigPlugin<ResolvedConfig> = (
 
       fs.writeFileSync(
         path.join(assetsDir, CHAINS_FILE),
-        JSON.stringify({ chains: resolved.androidChains }, null, 2)
+        JSON.stringify(
+          {
+            ...(resolved.androidDefaultFamily != null && {
+              defaultFamily: resolved.androidDefaultFamily,
+            }),
+            chains: resolved.androidChains,
+          },
+          null,
+          2
+        )
       );
 
       return cfg;

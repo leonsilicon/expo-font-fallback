@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "copy-fonts": "node scripts/copy-last-resort-font.js",
+    "prestart": "yarn copy-fonts",
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -24,6 +26,7 @@
   "private": true,
   "devDependencies": {
     "expo-dev-client": "~55.0.35",
+    "fontpkg-last-resort": "^17.0.0",
     "react-native-builder-bob": "^0.42.1",
     "react-native-monorepo-config": "^0.3.3"
   }

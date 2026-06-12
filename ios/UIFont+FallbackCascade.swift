@@ -12,13 +12,19 @@ extension UIFont {
       family in
       // Resolve by exact font name first (handles PostScript names), then by
       // family name (handles "Noto Sans CJK SC" style family lookups).
+      let resolved: UIFontDescriptor
       if let byName = UIFont(name: family, size: pointSize) {
-        return byName.fontDescriptor
+        resolved = byName.fontDescriptor
+      } else {
+        resolved = UIFontDescriptor(fontAttributes: [.family: family])
       }
-      let familyDescriptor = UIFontDescriptor(
-        fontAttributes: [.family: family]
-      )
-      return familyDescriptor
+      // Pin each fallback to an empty cascade list. A descriptor built from a
+      // resolved UIFont carries an implicit *system* cascade; without this,
+      // CoreText diverts to the system font as soon as one cascade entry lacks
+      // a glyph — never reaching the later bundled entries (e.g. a final
+      // "last resort" face). An empty list forces CoreText to keep walking our
+      // explicit chain in order.
+      return resolved.addingAttributes([.cascadeList: [UIFontDescriptor]()])
     }
 
     guard !fallbackDescriptors.isEmpty else {

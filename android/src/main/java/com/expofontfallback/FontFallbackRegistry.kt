@@ -32,9 +32,19 @@ object FontFallbackRegistry {
   private var chains: Map<String, List<String>> = emptyMap()
   private var warnBelowApi29 = false
 
+  /** Default family embedded by the config plugin (a file base name), or null. */
+  private var embeddedDefaultFamily: String? = null
+  /** Runtime override of [embeddedDefaultFamily], or null to use embedded. */
+  private var defaultFamilyOverride: String? = null
+
+  /** The effective default family: override if set, else embedded. */
+  private fun activeDefaultFamily(): String? = defaultFamilyOverride ?: embeddedDefaultFamily
+
   fun isInstalled(): Boolean = installed
 
   fun configuredFamilies(): List<String> = chains.keys.toList()
+
+  fun resolvedDefaultFamily(): String? = activeDefaultFamily()
 
   fun configJSON(context: Context): String =
     runCatching {
@@ -44,14 +54,22 @@ object FontFallbackRegistry {
   /**
    * Load the embedded config and register cascaded typefaces. Idempotent.
    *
+   * @param defaultFamilyOverride runtime override of the embedded default
+   *   family; empty string uses the embedded value.
    * @return true if at least the config parsed successfully
    */
-  fun install(context: Context, warnBelowApi29: Boolean): Boolean {
+  fun install(
+    context: Context,
+    warnBelowApi29: Boolean,
+    defaultFamilyOverride: String,
+  ): Boolean {
     this.warnBelowApi29 = warnBelowApi29
+    this.defaultFamilyOverride = defaultFamilyOverride.ifEmpty { null }
     val json = configJSON(context)
     val parsed =
       runCatching {
         val root = JSONObject(json)
+        embeddedDefaultFamily = root.optString("defaultFamily").ifEmpty { null }
         val chainsObj = root.optJSONObject("chains") ?: JSONObject()
         buildMap {
           for (key in chainsObj.keys()) {
@@ -66,6 +84,7 @@ object FontFallbackRegistry {
 
     chains = parsed
     registerAll(context)
+    applyDefaultFamily(context)
     installed = true
     return true
   }
@@ -77,6 +96,90 @@ object FontFallbackRegistry {
       if (typeface != null) {
         fontManager.addCustomFont(baseFamily, typeface)
       }
+    }
+  }
+
+  /**
+   * Make the configured default family the process-wide default typeface so
+   * that bare `<Text>` (no `fontFamily`) — which React Native resolves to
+   * [Typeface.DEFAULT] — renders in the default family with its fallback chain.
+   *
+   * React Native applies weight/italic via `Typeface.create(default, …)`, which
+   * preserves the custom fallback chain, so bare bold text still works.
+   *
+   * Requires API 29+ (for [Typeface.CustomFallbackBuilder]) and overrides the
+   * static [Typeface.DEFAULT] field via reflection. Any failure degrades to a
+   * no-op with a warning — bare text simply keeps the system font.
+   */
+  private fun applyDefaultFamily(context: Context) {
+    val defaultFamily = activeDefaultFamily() ?: return
+
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+      if (warnBelowApi29) {
+        Log.w(
+          TAG,
+          "API ${Build.VERSION.SDK_INT} < 29: default-family cascade is " +
+            "unavailable; bare <Text> keeps the system font.",
+        )
+      }
+      return
+    }
+
+    val fallbacks = chains[defaultFamily] ?: emptyList()
+    val typeface = buildCascadedTypeface(context, defaultFamily, fallbacks)
+    if (typeface == null) {
+      Log.w(TAG, "Default family '$defaultFamily' could not be loaded; skipping default.")
+      return
+    }
+
+    overrideDefaultTypeface(typeface)
+  }
+
+  /**
+   * Replace the static default typefaces with our cascaded [typeface] via
+   * reflection so the unstyled `<Text>` path renders with the default family
+   * and its fallback chain.
+   *
+   * We replace:
+   *  - `Typeface.DEFAULT` (read by `ReactTypefaceUtils.applyStyles` for styled
+   *    text with no `fontFamily`).
+   *  - All four `sDefaults` style slots (NORMAL/BOLD/ITALIC/BOLD_ITALIC) with
+   *    style-specific cascaded variants, used by `Typeface.create(null, style)`
+   *    and by `Typeface.defaultFromStyle`.
+   *
+   * Each style slot is a `Typeface.create(typeface, style)` of our cascaded
+   * face. Because `typeface` was built with `CustomFallbackBuilder`, the derived
+   * styled typefaces retain the same custom font collection (and thus the
+   * fallback chain). Best effort: any failure is logged and ignored.
+   */
+  private fun overrideDefaultTypeface(typeface: Typeface) {
+    runCatching {
+      val defaultField = Typeface::class.java.getDeclaredField("DEFAULT")
+      defaultField.isAccessible = true
+      defaultField.set(null, typeface)
+    }.onFailure {
+      Log.w(TAG, "Could not override Typeface.DEFAULT: ${it.message}")
+    }
+
+    runCatching {
+      val defaultsField = Typeface::class.java.getDeclaredField("sDefaults")
+      defaultsField.isAccessible = true
+      @Suppress("UNCHECKED_CAST")
+      val defaults = defaultsField.get(null) as? Array<Typeface?> ?: return@runCatching
+      val styles =
+        intArrayOf(
+          Typeface.NORMAL,
+          Typeface.BOLD,
+          Typeface.ITALIC,
+          Typeface.BOLD_ITALIC,
+        )
+      for (style in styles) {
+        if (style < defaults.size) {
+          defaults[style] = Typeface.create(typeface, style)
+        }
+      }
+    }.onFailure {
+      Log.w(TAG, "Could not override Typeface.sDefaults: ${it.message}")
     }
   }
 

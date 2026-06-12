@@ -6,11 +6,19 @@ const fontFallback = withFontFallback({
     './assets/fonts/Inter-Regular.ttf',
     './assets/fonts/Inter-Bold.ttf',
     './assets/fonts/NotoSansSC-Regular.otf',
+    // Copied out of the `fontpkg-last-resort` npm package by
+    // `scripts/copy-last-resort-font.js` (run via `yarn copy-fonts`). Used as
+    // the final cascade entry so uncovered glyphs render Unicode "last resort"
+    // box glyphs — proving the cascade is engaged rather than the OS system font.
+    './assets/fonts/generated/LastResort-Regular.ttf',
   ],
   chains: {
-    'Inter-Regular': ['NotoSansSC-Regular'],
-    'Inter-Bold': ['NotoSansSC-Regular'],
+    'Inter-Regular': ['NotoSansSC-Regular', 'LastResort-Regular'],
+    'Inter-Bold': ['NotoSansSC-Regular', 'LastResort-Regular'],
   },
+  // Apply Inter (with its CJK + last-resort fallback chain) to text that sets
+  // no fontFamily.
+  defaultFamily: 'Inter-Regular',
 });
 
 const config: ExpoConfig = {

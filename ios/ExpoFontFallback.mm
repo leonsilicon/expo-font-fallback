@@ -5,6 +5,12 @@
 
 @interface RNFontFallbackInterpose : NSObject
 + (BOOL)isAvailable;
++ (void)install;
+@end
+
+@interface RNTextLayoutManagerSwizzle : NSObject
++ (BOOL)isAvailable;
++ (void)install;
 @end
 
 @implementation ExpoFontFallback
@@ -24,20 +30,33 @@
 }
 
 - (NSNumber *)install:(BOOL)warnOnMissingGlyphs
-     logResolvedFonts:(BOOL)logResolvedFonts {
+        logResolvedFonts:(BOOL)logResolvedFonts
+    defaultFamilyOverride:(NSString *)defaultFamilyOverride {
   NSString *json = [self loadEmbeddedConfigJSON];
   FFFontFallbackRegistry *registry = FFFontFallbackRegistry.sharedRegistry;
   registry.warnOnMissingGlyphs = warnOnMissingGlyphs;
   BOOL ok = [registry configureWithChainsJSON:json];
+  [registry setDefaultFamilyOverride:defaultFamilyOverride ?: @""];
+
+  // Install the RN default font resolver hook (bare <Text> default family) and
+  // the text-layout swizzle (explicit-fontFamily cascade). Both idempotent.
+  [RNFontFallbackInterpose install];
+  [RNTextLayoutManagerSwizzle install];
 
   if (!RNFontFallbackInterpose.isAvailable) {
     NSLog(@"[expo-font-fallback] React Native font resolver symbol not found; "
-          @"<Text> fallback is inactive on this React Native version.");
+          @"default-family <Text> fallback is inactive on this RN version.");
+  }
+  if (!RNTextLayoutManagerSwizzle.isAvailable) {
+    NSLog(@"[expo-font-fallback] RCTTextLayoutManager not found; explicit-family "
+          @"<Text> cascade is inactive on this RN version.");
   }
 
   if (logResolvedFonts) {
     NSLog(@"[expo-font-fallback] configured families: %@",
           [[registry configuredFamilies] componentsJoinedByString:@", "]);
+    NSLog(@"[expo-font-fallback] default family: %@",
+          [registry resolvedDefaultFamily] ?: @"(none)");
   }
 
   return @(ok);

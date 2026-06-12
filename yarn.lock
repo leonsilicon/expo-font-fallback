@@ -6375,6 +6375,7 @@ __metadata:
     expo-dev-client: "npm:~55.0.35"
     expo-font-fallback: "workspace:*"
     expo-status-bar: "npm:~55.0.6"
+    fontpkg-last-resort: "npm:^17.0.0"
     react: "npm:19.2.0"
     react-dom: "npm:19.2.0"
     react-native: "npm:0.83.6"
@@ -6812,6 +6813,13 @@ __metadata:
   version: 2.3.0
   resolution: "fontfaceobserver@npm:2.3.0"
   checksum: 10c0/9b539d5021757d3ed73c355bdb839296d6654de473a992aa98993ef46d951f0361545323de68f6d70c5334d7e3e9f409c1ae7a03c168b00cb0f6c5dea6c77bfa
+  languageName: node
+  linkType: hard
+
+"fontpkg-last-resort@npm:^17.0.0":
+  version: 17.0.0
+  resolution: "fontpkg-last-resort@npm:17.0.0"
+  checksum: 10c0/e652b2ad1fe73c99fcf6d1f4555c371103129bbce937bfd636c3197d79e67ae6910643469a065ce3be37bedbb6ee7463ec63c7c9a6a99296a7392f662c33bf34
   languageName: node
   linkType: hard
 

@@ -67,6 +67,30 @@ describe('resolveConfig', () => {
     ).toThrow(/not.*among the configured/i);
   });
 
+  it('resolves defaultFamily to PostScript (iOS) and file (Android) names', () => {
+    const resolved = resolveConfig(projectRoot, {
+      ...baseConfig,
+      defaultFamily: 'NotoSansSC-Regular',
+    });
+    expect(resolved.iosDefaultFamily).toBe('NotoSansCJKsc-Regular');
+    expect(resolved.androidDefaultFamily).toBe('NotoSansSC-Regular');
+  });
+
+  it('leaves defaultFamily undefined when not configured', () => {
+    const resolved = resolveConfig(projectRoot, baseConfig);
+    expect(resolved.iosDefaultFamily).toBeUndefined();
+    expect(resolved.androidDefaultFamily).toBeUndefined();
+  });
+
+  it('throws when defaultFamily is not among the configured fonts', () => {
+    expect(() =>
+      resolveConfig(projectRoot, {
+        ...baseConfig,
+        defaultFamily: 'MissingFont',
+      })
+    ).toThrow(/defaultFamily.*not.*among the configured/i);
+  });
+
   it('throws on unsupported extensions', () => {
     expect(() =>
       resolveConfig(projectRoot, {

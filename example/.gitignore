@@ -1,3 +1,6 @@
 # These folders are generated with prebuild (CNG)
 android/
 ios/
+
+# Fonts copied out of node_modules by scripts/copy-last-resort-font.js
+assets/fonts/generated/

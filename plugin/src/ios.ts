@@ -39,7 +39,16 @@ export const withFontFallbackIos: ConfigPlugin<ResolvedConfig> = (
 
       fs.writeFileSync(
         path.join(destDir, CHAINS_FILE),
-        JSON.stringify({ chains: resolved.iosChains }, null, 2)
+        JSON.stringify(
+          {
+            ...(resolved.iosDefaultFamily != null && {
+              defaultFamily: resolved.iosDefaultFamily,
+            }),
+            chains: resolved.iosChains,
+          },
+          null,
+          2
+        )
       );
 
       return cfg;

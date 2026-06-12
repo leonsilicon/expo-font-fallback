@@ -10,8 +10,15 @@ const installed = FontFallback.install({
 
 const SAMPLE = 'Hello 你好 こんにちは 안녕하세요 ∑ → ★';
 
+// Codepoints in exotic Unicode blocks that neither Inter nor Noto Sans SC
+// cover (Egyptian Hieroglyphs, Linear B, Deseret). With the Last Resort font
+// as the final cascade entry these render block-hint glyphs (a boxed symbol),
+// proving the cascade reached our bundled font instead of the OS system font.
+const LAST_RESORT_SAMPLE = '𓀀 𐀀 𐐀';
+
 export default function App() {
   const [report, setReport] = useState<GlyphCoverageReport | null>(null);
+  const defaultFamily = FontFallback.getConfig().defaultFamily ?? '(none)';
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -19,6 +26,7 @@ export default function App() {
       <Text style={styles.label}>
         isInstalled(): {String(FontFallback.isInstalled())}
       </Text>
+      <Text style={styles.label}>defaultFamily: {defaultFamily}</Text>
 
       <Text style={styles.heading}>Inter-Regular (with fallback)</Text>
       <Text style={[styles.sample, { fontFamily: 'Inter-Regular' }]}>
@@ -30,8 +38,37 @@ export default function App() {
         {SAMPLE}
       </Text>
 
-      <Text style={styles.heading}>System font (control)</Text>
+      <Text style={styles.heading}>Bare Text (no fontFamily → default)</Text>
       <Text style={styles.sample}>{SAMPLE}</Text>
+
+      <Text style={styles.heading}>
+        Bare bold Text (no fontFamily → default)
+      </Text>
+      <Text style={[styles.sample, { fontWeight: 'bold' }]}>{SAMPLE}</Text>
+
+      <Text style={styles.heading}>
+        Last Resort (Inter-Regular → uncovered glyphs)
+      </Text>
+      <Text style={[styles.sample, { fontFamily: 'Inter-Regular' }]}>
+        {LAST_RESORT_SAMPLE}
+      </Text>
+
+      <Text style={styles.heading}>Last Resort (bare → default chain)</Text>
+      <Text style={styles.sample}>{LAST_RESORT_SAMPLE}</Text>
+
+      <Text style={styles.heading}>
+        Last Resort (bare BOLD → default chain)
+      </Text>
+      <Text style={[styles.sample, { fontWeight: 'bold' }]}>
+        {LAST_RESORT_SAMPLE}
+      </Text>
+
+      <Text style={styles.heading}>
+        CONTROL: forced fontFamily LastResort-Regular
+      </Text>
+      <Text style={[styles.sample, { fontFamily: 'LastResort-Regular' }]}>
+        {LAST_RESORT_SAMPLE}
+      </Text>
 
       <View style={styles.spacer} />
       <Button

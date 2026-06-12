@@ -56,7 +56,8 @@ without its extension). Run `npx expo prebuild` after changing the config.
           "chains": {
             "Inter-Regular": ["NotoSansSC-Regular"],
             "Inter-Bold": ["NotoSansSC-Regular"]
-          }
+          },
+          "defaultFamily": "Inter-Regular"
         }
       ]
     ]
@@ -94,6 +95,8 @@ const config: ExpoConfig = {
         'Inter-Regular': ['NotoSansSC-Regular'],
         'Inter-Bold': ['NotoSansSC-Regular'],
       },
+      // Apply to <Text> that sets no fontFamily (optional).
+      defaultFamily: 'Inter-Regular',
     }),
   ],
 };
@@ -122,17 +125,40 @@ FontFallback.install({
 That's it. Existing `<Text style={{ fontFamily: 'Inter-Regular' }}>` now uses the
 configured fallback chain.
 
+### App-wide default family
+
+Set `defaultFamily` in the plugin config to apply a bundled family — and its
+fallback chain — to every `<Text>` that specifies **no** `fontFamily`. A bare
+`<Text>Hello 你好</Text>` then renders `Hello` in your default family and `你好`
+via that family's chain, instead of dropping to the OS system font. Bare
+weighted text (e.g. `fontWeight: 'bold'`) resolves to the matching face of the
+default family.
+
+`defaultFamily` must be one of `fonts`. You can override the embedded value at
+runtime via `install({ defaultFamily })`. You don't change anything else — keep
+writing plain `<Text>` from `react-native`; `install()` wires the default up
+transparently (natively on iOS, and via a render-time `Text` shim on Android).
+An explicit `fontFamily` on a `<Text>` always takes precedence.
+
+> **Android note:** the default-family cascade needs API 29+
+> (`Typeface.CustomFallbackBuilder`). On older devices bare `<Text>` keeps the
+> system font; explicit per-`fontFamily` chains still apply.
+
 ### API
 
 ```ts
 FontFallback.install(options?: {
   warnOnMissingGlyphs?: boolean; // dev warnings for uncovered glyphs
   logResolvedFonts?: boolean;    // log resolved chains at install time
+  defaultFamily?: string;        // override the embedded default family
 }): boolean;
 
 FontFallback.isInstalled(): boolean;
 
-FontFallback.getConfig(): { chains: Record<string, string[]> };
+FontFallback.getConfig(): {
+  chains: Record<string, string[]>;
+  defaultFamily?: string;
+};
 
 // Development helper: which font covers each character, and what's missing.
 FontFallback.checkText(text: string, baseFamily: string): GlyphCoverageReport;

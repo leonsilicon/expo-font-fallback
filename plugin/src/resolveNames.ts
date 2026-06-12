@@ -21,6 +21,10 @@ export type ResolvedConfig = {
   iosChains: Record<string, string[]>;
   /** Chains expressed in file base names — for Android. */
   androidChains: Record<string, string[]>;
+  /** Default family as a PostScript name (iOS), if configured. */
+  iosDefaultFamily?: string;
+  /** Default family as a file base name (Android), if configured. */
+  androidDefaultFamily?: string;
 };
 
 const SUPPORTED_EXTS = new Set(['.ttf', '.otf']);
@@ -113,7 +117,27 @@ export function resolveConfig(
     );
   }
 
-  return { fonts, iosChains, androidChains };
+  let iosDefaultFamily: string | undefined;
+  let androidDefaultFamily: string | undefined;
+  if (config.defaultFamily != null) {
+    const defaultFont = byLogicalName.get(config.defaultFamily);
+    if (!defaultFont) {
+      throw new Error(
+        `[expo-font-fallback] defaultFamily "${config.defaultFamily}" is not ` +
+          'among the configured `fonts`. It must match a font file base name.'
+      );
+    }
+    iosDefaultFamily = defaultFont.postScriptName;
+    androidDefaultFamily = defaultFont.fileBaseName;
+  }
+
+  return {
+    fonts,
+    iosChains,
+    androidChains,
+    iosDefaultFamily,
+    androidDefaultFamily,
+  };
 }
 
 function safeReadNames(sourcePath: string, rel: string) {

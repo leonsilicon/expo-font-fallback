@@ -11,9 +11,15 @@ export interface Spec extends TurboModule {
    *
    * @param warnOnMissingGlyphs enable development warnings for uncovered glyphs
    * @param logResolvedFonts log the resolved chains at install time
+   * @param defaultFamilyOverride override the embedded app-wide default family;
+   *   pass an empty string to use the value embedded by the config plugin
    * @returns `true` if installation succeeded
    */
-  install(warnOnMissingGlyphs: boolean, logResolvedFonts: boolean): boolean;
+  install(
+    warnOnMissingGlyphs: boolean,
+    logResolvedFonts: boolean,
+    defaultFamilyOverride: string
+  ): boolean;
 
   isInstalled(): boolean;
 

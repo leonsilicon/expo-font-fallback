@@ -19,15 +19,27 @@ public final class FontFallbackRegistry: NSObject {
   private(set) var installed = false
   @objc public var warnOnMissingGlyphs = false
 
+  /// The app-wide default family embedded by the config plugin (a PostScript
+  /// name), applied to text that specifies no `fontFamily`. `nil` when unset.
+  private var embeddedDefaultFamily: String?
+  /// Optional runtime override of `embeddedDefaultFamily`.
+  private var defaultFamilyOverride: String?
+  /// The effective default family: override if set, else the embedded value.
+  private var activeDefaultFamily: String? {
+    defaultFamilyOverride ?? embeddedDefaultFamily
+  }
+
   private override init() {}
 
   // MARK: Configuration
 
-  /// Replace the configured chains. Clears the wrapped-font cache.
-  func configure(chains: [String: [String]]) {
+  /// Replace the configured chains and default family. Clears the cache.
+  func configure(chains: [String: [String]], defaultFamily: String?) {
     lock.lock()
     defer { lock.unlock() }
     self.chains = chains
+    self.embeddedDefaultFamily =
+      (defaultFamily?.isEmpty == false) ? defaultFamily : nil
     self.cache.removeAll()
     self.installed = true
   }
@@ -40,8 +52,23 @@ public final class FontFallbackRegistry: NSObject {
     else {
       return false
     }
-    configure(chains: rawChains)
+    configure(chains: rawChains, defaultFamily: root["defaultFamily"] as? String)
     return true
+  }
+
+  /// Set a runtime override of the embedded default family. An empty string
+  /// clears the override so the embedded value is used.
+  @objc public func setDefaultFamilyOverride(_ family: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    defaultFamilyOverride = family.isEmpty ? nil : family
+    cache.removeAll()
+  }
+
+  /// The effective default family (override or embedded), for diagnostics.
+  @objc public func resolvedDefaultFamily() -> String? {
+    lock.lock(); defer { lock.unlock() }
+    return activeDefaultFamily
   }
 
   @objc public func isInstalled() -> Bool {
@@ -60,26 +87,27 @@ public final class FontFallbackRegistry: NSObject {
     return chains[baseFamily]
   }
 
-  // MARK: Font wrapping (called from the dyld interpose)
+  // MARK: Explicit-family cascade (called from the text-layout swizzle)
 
-  /// If `baseFamily` has a configured chain, return `font` with that chain
-  /// attached as its cascade list; otherwise return `font` unchanged.
+  /// If `font` belongs to a family that has a configured chain, return a copy of
+  /// `font` with that chain attached as its cascade list; otherwise return nil.
   ///
-  /// This is the hot path: it runs for every font React Native resolves, so
-  /// results are cached by family + size + traits.
-  @objc(wrapFont:baseFamily:)
-  public func wrap(_ font: UIFont, baseFamily: String?) -> UIFont {
-    guard let baseFamily, !baseFamily.isEmpty else { return font }
+  /// Used to post-process the fonts React Native resolves for `<Text>` that set
+  /// an explicit `fontFamily` (which never reach the default font resolver).
+  /// Matching is by the font's PostScript name — the same key space as the
+  /// emitted iOS chains. Results are cached.
+  @objc(cascadeFontForFont:)
+  public func cascadeFont(for font: UIFont) -> UIFont? {
+    let psName = font.fontName
 
-    let fallbacks: [String]
     lock.lock()
-    guard let configured = chains[baseFamily] else {
+    guard let fallbacks = chains[psName] else {
       lock.unlock()
-      return font
+      return nil
     }
-    fallbacks = configured
-
-    let key = cacheKey(baseFamily: baseFamily, font: font)
+    let key = "__explicit__|" + cacheKey(family: psName, size: font.pointSize,
+                                         weight: referenceWeight(of: font),
+                                         italic: isItalic(font))
     if let cached = cache[key] {
       lock.unlock()
       return cached
@@ -94,9 +122,102 @@ public final class FontFallbackRegistry: NSObject {
     return wrapped
   }
 
-  private func cacheKey(baseFamily: String, font: UIFont) -> String {
-    let traits = font.fontDescriptor.symbolicTraits.rawValue
-    return "\(baseFamily)|\(font.pointSize)|\(traits)"
+  private func referenceWeight(of font: UIFont) -> CGFloat {
+    guard
+      let traits = font.fontDescriptor.object(forKey: .traits)
+        as? [UIFontDescriptor.TraitKey: Any],
+      let raw = traits[.weight] as? CGFloat
+    else {
+      return UIFont.Weight.regular.rawValue
+    }
+    return raw
+  }
+
+  private func isItalic(_ font: UIFont) -> Bool {
+    return font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+  }
+
+  // MARK: Default font resolution (called from RCTSetDefaultFontResolver)
+
+  /// Produce the font React Native should use for text with **no** explicit
+  /// `fontFamily`, applying the configured `defaultFamily` and its cascade.
+  ///
+  /// Returns the default family's face at the requested weight/italic with its
+  /// fallback chain attached, or `nil` when no default family is configured (or
+  /// it cannot be resolved) so React Native uses its own system font.
+  ///
+  /// React Native only consults this for the default/system-font branch;
+  /// explicit families are resolved by RN directly and never reach here.
+  @objc(defaultFontWithSize:weight:italic:)
+  public func defaultFont(
+    size: CGFloat,
+    weight: CGFloat,
+    italic: Bool
+  ) -> UIFont? {
+    lock.lock()
+    guard let defaultFamily = activeDefaultFamily else {
+      lock.unlock()
+      return nil
+    }
+    let fallbacks = chains[defaultFamily] ?? []
+
+    let key = cacheKey(
+      family: defaultFamily, size: size, weight: weight, italic: italic
+    )
+    if let cached = cache[key] {
+      lock.unlock()
+      return cached
+    }
+    lock.unlock()
+
+    // Build the default-family face at the requested traits.
+    guard let base = makeFont(
+      family: defaultFamily, size: size, weight: weight, italic: italic
+    ) else {
+      // Configured default family does not resolve to a registered font.
+      return nil
+    }
+
+    let result = fallbacks.isEmpty ? base : base.addingFallbackCascade(fallbacks)
+
+    lock.lock()
+    cache[key] = result
+    lock.unlock()
+    return result
+  }
+
+  /// Build a font in `family` at the given size, weight and italic. Falls back
+  /// to the nearest available weight when an exact face is not registered.
+  /// Returns nil if `family` resolves to no real font.
+  private func makeFont(
+    family: String,
+    size: CGFloat,
+    weight: CGFloat,
+    italic: Bool
+  ) -> UIFont? {
+    var traits: [UIFontDescriptor.TraitKey: Any] = [.weight: weight]
+    if italic {
+      traits[.symbolic] = UIFontDescriptor.SymbolicTraits.traitItalic.rawValue
+    }
+    let descriptor = UIFontDescriptor(fontAttributes: [
+      .family: family,
+      .traits: traits,
+    ])
+    // `.family` matching handles real family names; if the configured name is a
+    // PostScript name (common for CJK faces), fall back to exact-name lookup.
+    if let matched = descriptor.matchingFontDescriptors(withMandatoryKeys: [.family]).first {
+      return UIFont(descriptor: matched, size: size)
+    }
+    if let byName = UIFont(name: family, size: size) {
+      return byName
+    }
+    return nil
+  }
+
+  private func cacheKey(
+    family: String, size: CGFloat, weight: CGFloat, italic: Bool
+  ) -> String {
+    return "\(family)|\(size)|\(weight)|\(italic ? 1 : 0)"
   }
 
   // MARK: Glyph coverage (checkText)
@@ -146,6 +267,10 @@ public final class FontFallbackRegistry: NSObject {
     var chars = Array(String(scalar).utf16)
     var glyphs = [CGGlyph](repeating: 0, count: chars.count)
     let ok = CTFontGetGlyphsForCharacters(font, &chars, &glyphs, chars.count)
-    return ok && glyphs.allSatisfy { $0 != 0 }
+    // For a non-BMP scalar, `chars` is a surrogate pair: CoreText returns the
+    // composed glyph in the first slot and 0 in the trailing slot. A scalar is
+    // covered iff its leading glyph is non-zero (requiring *all* slots non-zero
+    // would wrongly flag every astral-plane codepoint as missing).
+    return ok && (glyphs.first ?? 0) != 0
   }
 }

@@ -5,14 +5,27 @@ import com.facebook.react.bridge.ReactApplicationContext
 class ExpoFontFallbackModule(reactContext: ReactApplicationContext) :
   NativeExpoFontFallbackSpec(reactContext) {
 
-  override fun install(warnOnMissingGlyphs: Boolean, logResolvedFonts: Boolean): Boolean {
+  override fun install(
+    warnOnMissingGlyphs: Boolean,
+    logResolvedFonts: Boolean,
+    defaultFamilyOverride: String,
+  ): Boolean {
     // `warnOnMissingGlyphs` doubles as the below-API-29 warning toggle: in dev
     // builds the app opts in to fallback diagnostics in general.
-    val ok = FontFallbackRegistry.install(reactApplicationContext, warnOnMissingGlyphs)
+    val ok =
+      FontFallbackRegistry.install(
+        reactApplicationContext,
+        warnOnMissingGlyphs,
+        defaultFamilyOverride,
+      )
     if (logResolvedFonts) {
       android.util.Log.i(
         "ExpoFontFallback",
         "configured families: ${FontFallbackRegistry.configuredFamilies().joinToString(", ")}",
+      )
+      android.util.Log.i(
+        "ExpoFontFallback",
+        "default family: ${FontFallbackRegistry.resolvedDefaultFamily() ?: "(none)"}",
       )
     }
     return ok

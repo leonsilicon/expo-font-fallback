@@ -6,6 +6,13 @@
 export type FontFallbackPluginConfig = {
   fonts: string[];
   chains: Record<string, string[]>;
+  /**
+   * Logical name (font file base name) to apply to any `<Text>` that does not
+   * specify its own `fontFamily`. Must be one of `fonts`. When set, text with no
+   * `fontFamily` resolves as if it had this family, so that family's chain (if
+   * any) also applies. Omit to keep the current behavior (no default).
+   */
+  defaultFamily?: string;
   fontNames?: Record<string, { ios?: string; android?: string }>;
   android?: {
     belowApi29?: 'base-only' | 'warn';
