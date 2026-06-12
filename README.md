@@ -210,6 +210,43 @@ chain may still hit the platform's own fallback.
 | Android API < 29 | `Typeface.CustomFallbackBuilder` is unavailable; the base font is registered without a chain, the default-family cascade is skipped, and a dev warning is logged. |
 | Unrecognized RN version | If the iOS hook points are absent, fallback is inactive (logged); the app does not crash. |
 
+### Gotchas & limitations
+
+A few non-obvious things worth knowing:
+
+- **Verifying with CJK is misleading.** Both iOS and Android ship system fonts
+  that cover CJK, Kana, Hangul, and most common scripts, so that text renders
+  correctly *even if the cascade does nothing*. To actually confirm your chain is
+  engaged, test a glyph **no system font covers** — e.g. a "last resort" font
+  with boxed block-hint glyphs, or an exotic block like Egyptian Hieroglyphs.
+  Seeing real CJK glyphs is not proof.
+- **`<Text>` only.** The hooks cover React Native `<Text>`. `TextInput`,
+  `WebView` content, native UI (alerts, navigation titles), and third-party
+  components that render text natively resolve fonts on their own paths and are
+  unaffected.
+- **`getConfig().defaultFamily` returns the resolved, platform-specific name**
+  (PostScript name on iOS, file base name on Android), which can differ from the
+  string you wrote in config for fonts whose PostScript name doesn't match the
+  file name. See [Font names](#font-names).
+- **`checkText` is a config check, not a render oracle.** It inspects the fonts
+  directly and does not exercise RN's live resolution or OS system fallback, so
+  it can disagree with what actually renders on screen.
+- **iOS hooks a private RN method.** The explicit-`fontFamily` cascade swizzles
+  `-[RCTTextLayoutManager _nsAttributedStringFromAttributedString:]`. If a future
+  React Native renames or removes it, that path silently goes inactive (logged,
+  no crash); the public default-font resolver is unaffected.
+- **iOS weight matching is nearest-available.** A bare bold default with only a
+  Regular face registered resolves to the closest weight you bundled, not a
+  synthesized bold.
+- **Android default relies on a JS `<Text>` shim.** `install()` wraps the `Text`
+  export from `react-native`. Components that render text *without* going through
+  that export won't pick up the default family (explicit per-`fontFamily` chains
+  still work everywhere). The shim is Android-only; iOS uses a native resolver.
+- **Long chains are capped on Android.** `Typeface.CustomFallbackBuilder` allows
+  up to 64 fallback families; entries beyond that are skipped with a warning.
+- **`install()` should run before your first render** so the chains — and the
+  Android default-font shim — are in place before anything mounts.
+
 ## How it works under the hood
 
 There are two halves: a **build-time config plugin** that bundles your fonts and
