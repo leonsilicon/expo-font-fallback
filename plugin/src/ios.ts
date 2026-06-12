@@ -74,12 +74,25 @@ export const withFontFallbackIos: ConfigPlugin<ResolvedConfig> = (
     const projectName = cfg.modRequest.projectName!;
     const group = `${projectName}/${FONTS_SUBDIR}`;
 
+    // Filenames already shipped as build resources by another plugin (e.g.
+    // `expo-font` copying from `public/fonts`). Adding a second CpResource that
+    // produces the same `.app/<name>` makes Xcode fail with "Multiple commands
+    // produce …". A font shared between this plugin and `expo-font` only needs
+    // to be in the bundle once — our chains JSON references it by PostScript
+    // name and `UIAppFonts` lists it regardless of which group copies it — so
+    // skip re-adding any font whose output basename already exists in the
+    // project, even under a different group.
+    const existingResourceBaseNames = collectResourceBaseNames(project);
+
     const resourceNames = [
       ...resolved.fonts.map((f) => f.fileBaseName + f.ext),
       CHAINS_FILE,
     ];
 
     for (const name of resourceNames) {
+      if (existingResourceBaseNames.has(name)) {
+        continue;
+      }
       const filePath = `${group}/${name}`;
       if (!project.hasFile(filePath)) {
         IOSConfig.XcodeUtils.addResourceFileToGroup({
@@ -89,6 +102,7 @@ export const withFontFallbackIos: ConfigPlugin<ResolvedConfig> = (
           isBuildFile: true,
           verbose: false,
         });
+        existingResourceBaseNames.add(name);
       }
     }
     return cfg;
@@ -96,3 +110,31 @@ export const withFontFallbackIos: ConfigPlugin<ResolvedConfig> = (
 
   return config;
 };
+
+/**
+ * Collect the basenames of every file reference in the Xcode project (e.g.
+ * `noto-sans.ttf`). Used to detect fonts already added as build resources by
+ * another plugin so we don't emit a duplicate CpResource for the same output.
+ */
+function collectResourceBaseNames(project: {
+  hash: { project: { objects: Record<string, unknown> } };
+}): Set<string> {
+  const baseNames = new Set<string>();
+  const fileRefs = (project.hash.project.objects.PBXFileReference ?? {}) as Record<
+    string,
+    { path?: string; name?: string } | string
+  >;
+
+  for (const entry of Object.values(fileRefs)) {
+    if (typeof entry !== 'object' || entry == null) {
+      continue;
+    }
+    const ref = entry.path ?? entry.name;
+    if (typeof ref !== 'string') {
+      continue;
+    }
+    baseNames.add(path.basename(ref.replace(/^"|"$/g, '')));
+  }
+
+  return baseNames;
+}
