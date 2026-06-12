@@ -1,6 +1,6 @@
 {
   "name": "expo-font-fallback",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Fallback fonts for react native.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",

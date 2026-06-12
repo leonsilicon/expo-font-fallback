@@ -108,8 +108,91 @@ export const withFontFallbackIos: ConfigPlugin<ResolvedConfig> = (
     return cfg;
   });
 
+  // 4. Final pass: drop duplicate Resources build files that produce the same
+  // output filename. The step-3 pre-check above can only see file references
+  // that already exist *when this plugin's mod runs* — but `expo-font` (and
+  // other font plugins) also add their fonts via `withXcodeProject`, and Expo
+  // does not guarantee those mods run before ours. When a shared base font
+  // (e.g. `noto-sans.ttf`) is added by both plugins, Xcode emits two
+  // `CpResource` commands writing the same `.app/<name>` and fails the build
+  // with "Multiple commands produce …". The file contents are identical, so we
+  // keep one build file per output basename and remove the rest. Running this
+  // as a separately-registered mod means it observes the fully-populated
+  // project regardless of plugin ordering.
+  config = withXcodeProject(config, (cfg) => {
+    dedupeResourceBuildFilesByOutputName(cfg.modResults);
+    return cfg;
+  });
+
   return config;
 };
+
+type PbxProject = {
+  hash: { project: { objects: Record<string, Record<string, unknown>> } };
+};
+
+/**
+ * Remove duplicate `PBXBuildFile` entries in the Resources build phase that
+ * resolve to the same output filename (font basename). Keeps the first
+ * occurrence and strips later duplicates from every resources phase. Leaves the
+ * underlying `PBXFileReference`s in place — only the build-phase membership
+ * (which drives the `CpResource` command) is deduplicated.
+ */
+function dedupeResourceBuildFilesByOutputName(project: PbxProject): void {
+  const objects = project.hash.project.objects;
+  const buildFiles = (objects.PBXBuildFile ?? {}) as Record<
+    string,
+    { fileRef?: string } | string
+  >;
+  const fileRefs = (objects.PBXFileReference ?? {}) as Record<
+    string,
+    { path?: string; name?: string } | string
+  >;
+
+  const baseNameOf = (raw: string) =>
+    path.basename(raw.replace(/^"|"$/g, ''));
+
+  // Map each build-file UUID -> the output filename it produces.
+  const buildFileOutputName = new Map<string, string>();
+  for (const [uuid, entry] of Object.entries(buildFiles)) {
+    if (uuid.endsWith('_comment') || typeof entry !== 'object' || entry == null) {
+      continue;
+    }
+    const fileRef = entry.fileRef;
+    if (typeof fileRef !== 'string') continue;
+    const ref = fileRefs[fileRef];
+    if (typeof ref !== 'object' || ref == null) continue;
+    const refPath = ref.path ?? ref.name;
+    if (typeof refPath !== 'string') continue;
+    buildFileOutputName.set(uuid, baseNameOf(refPath));
+  }
+
+  const resourcePhases = (objects.PBXResourcesBuildPhase ?? {}) as Record<
+    string,
+    { files?: { value: string }[] } | string
+  >;
+
+  const seenOutputNames = new Set<string>();
+  for (const [uuid, phase] of Object.entries(resourcePhases)) {
+    if (uuid.endsWith('_comment') || typeof phase !== 'object' || phase == null) {
+      continue;
+    }
+    if (!Array.isArray(phase.files)) continue;
+    phase.files = phase.files.filter((file) => {
+      const outputName = buildFileOutputName.get(file.value);
+      if (outputName == null) return true;
+      if (seenOutputNames.has(outputName)) {
+        // Duplicate output: drop this build-file membership (and its orphaned
+        // PBXBuildFile entry) so only one CpResource produces the file.
+        delete buildFiles[file.value];
+        delete buildFiles[`${file.value}_comment`];
+        return false;
+      }
+      seenOutputNames.add(outputName);
+      return true;
+    });
+  }
+}
 
 /**
  * Collect the basenames of every file reference in the Xcode project (e.g.
