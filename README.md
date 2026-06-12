@@ -14,10 +14,13 @@ fonts instead of tofu boxes or an inconsistent system font.
 ```
 
 - **iOS** attaches a [`UIFontDescriptor` cascade list][cascade] to the fonts
-  React Native resolves, via a dynamic-linker interpose of the Fabric font
-  resolver. Works transparently for normal `<Text>`.
+  React Native resolves for your `<Text>`. Works transparently for normal
+  `<Text>`.
 - **Android** registers a [`Typeface.CustomFallbackBuilder`][custom-fallback]
   chain (API 29+) with React Native's `ReactFontManager`.
+
+See [How it works under the hood](#how-it-works-under-the-hood) for the exact
+mechanism on each platform.
 
 [cascade]: https://developer.apple.com/documentation/uikit/uifontdescriptor/attributename/1616821-cascadelist
 [custom-fallback]: https://developer.android.com/reference/android/graphics/Typeface.CustomFallbackBuilder
@@ -112,7 +115,8 @@ you want to declare the config separately.
 ## Usage
 
 Call `install()` **once, before your first React render** — at module scope in
-your entry file is ideal:
+your entry file is ideal (this also lets the app-wide default take effect before
+anything mounts):
 
 ```ts
 import { FontFallback } from 'expo-font-fallback';
@@ -123,7 +127,7 @@ FontFallback.install({
 ```
 
 That's it. Existing `<Text style={{ fontFamily: 'Inter-Regular' }}>` now uses the
-configured fallback chain.
+configured fallback chain — no other code changes.
 
 ### App-wide default family
 
@@ -188,8 +192,9 @@ If auto-detection picks the wrong name, override it explicitly:
 
 ## What this guarantees (and what it doesn't)
 
-**Guaranteed:** for a configured base family, the configured bundled fallback
-chain is tried *before* the platform system fallback.
+**Guaranteed:** in `<Text>`, for a configured base family — whether set
+explicitly via `fontFamily` or applied through `defaultFamily` — the configured
+bundled fallback chain is tried *before* the platform system fallback.
 
 **Not guaranteed:** this does not globally disable system fallback. System UI,
 alerts, third-party native components, `TextInput` (may resolve fonts
@@ -200,10 +205,93 @@ chain may still hit the platform's own fallback.
 
 | Case | Behavior |
 | --- | --- |
-| Android API ≥ 29 | Full ordered custom fallback chain. |
-| Android API < 29 | `Typeface.CustomFallbackBuilder` is unavailable; the base font is registered without a chain, and a dev warning is logged. |
-| iOS new arch (Fabric) | Supported via font-resolver interpose. |
-| Unrecognized RN version | If the iOS interpose target symbol is absent, `<Text>` fallback is inactive (logged); the app does not crash. |
+| iOS new arch (Fabric) | Fully supported — explicit `fontFamily` and the app-wide default. |
+| Android API ≥ 29 | Full ordered custom fallback chain, including the default family. |
+| Android API < 29 | `Typeface.CustomFallbackBuilder` is unavailable; the base font is registered without a chain, the default-family cascade is skipped, and a dev warning is logged. |
+| Unrecognized RN version | If the iOS hook points are absent, fallback is inactive (logged); the app does not crash. |
+
+## How it works under the hood
+
+There are two halves: a **build-time config plugin** that bundles your fonts and
+embeds the chains, and a **runtime** that hooks React Native's text rendering on
+each platform so those chains actually take effect.
+
+### Build time (the config plugin)
+
+During `expo prebuild`, the plugin:
+
+1. **Copies your font files** into the native projects (`ios/<App>/Fonts/` and
+   `android/app/src/main/assets/fonts/`) and registers them — `UIAppFonts` in
+   `Info.plist` on iOS, asset fonts on Android.
+2. **Resolves names per platform.** iOS looks fonts up by their internal
+   **PostScript name**; Android by **file base name**. The plugin reads each
+   font's OpenType `name` table to map your file base names to the right lookup
+   name for each platform (see [Font names](#font-names)).
+3. **Emits `font_fallback_chains.json`** into each app bundle — the same chains,
+   keyed by PostScript names for iOS and by file base names for Android, plus
+   the resolved `defaultFamily`. The runtime loads this at `install()`.
+
+So your config keys stay as friendly file base names; the platform-specific name
+juggling happens at prebuild.
+
+### Runtime: iOS (new architecture / Fabric)
+
+On Fabric, `<Text>` font resolution flows through the C++ function
+`RCTFontWithFontProperties`. There are two cases, hooked separately:
+
+- **Text with an explicit `fontFamily`.** React Native resolves that font
+  itself, so we post-process it: we swizzle the Objective-C method
+  `-[RCTTextLayoutManager _nsAttributedStringFromAttributedString:]` — the single
+  funnel every measure and draw pass goes through. After the original builds the
+  `NSAttributedString`, we walk its `NSFontAttributeName` runs and, for any font
+  whose family has a configured chain, swap in a copy carrying that chain as its
+  [`UIFontDescriptor` cascade list][cascade].
+- **Text with no `fontFamily` (the app-wide default).** This branch consults the
+  public [`RCTSetDefaultFontResolver`][resolver] hook. We install a resolver that
+  returns your `defaultFamily`'s face at the requested size/weight/italic, with
+  its chain attached — so bare `<Text>` renders the default family and cascades
+  through it.
+
+Both hooks are best-effort: if a target symbol or method is missing on a future
+React Native version, installation is a no-op and the app does not crash. One
+important detail — each fallback entry is pinned to an *empty* cascade list so
+CoreText walks **your** chain in order instead of diverting to the system font as
+soon as one entry lacks a glyph.
+
+> An earlier approach used a dynamic-linker (`dyld`) interpose of
+> `RCTFontWithFontProperties`. That does **not** work with the prebuilt React
+> core: the symbol and its caller live in the same image, so the call is bound
+> statically and never routes through the interpose. The resolver + swizzle above
+> are the supported seams.
+
+### Runtime: Android (API 29+)
+
+- **Text with an explicit `fontFamily`.** We build a
+  [`Typeface.CustomFallbackBuilder`][custom-fallback] typeface (base font + your
+  ordered fallback families) and register it under the family name with
+  `ReactFontManager.addCustomFont`. React Native checks that registry first when
+  resolving a `fontFamily`, so the cascade applies transparently. Weights are
+  preserved because RN derives styled variants with `Typeface.create`, which
+  keeps the custom font collection.
+- **Text with no `fontFamily` (the app-wide default).** Android's attribute-less
+  text path draws with the platform's native default font, and modern Android
+  exposes no API to redirect it (`Typeface.setDefault` no longer exists). So the
+  default is applied at the JS layer instead: `install()` replaces the `Text`
+  export on the `react-native` module object with a thin wrapper that injects
+  `defaultFamily` as the *base* of the element's style (an explicit `fontFamily`
+  still wins). Because Metro compiles `import { Text }` to live property reads,
+  this is transparent and order-independent — **you keep writing plain `<Text>`
+  and change nothing.** This shim is Android-only; iOS uses its native resolver.
+
+### `checkText` (dev helper)
+
+`checkText(text, baseFamily)` walks `[baseFamily, ...chain]` and reports, per
+character, which font first covers it and which codepoints nothing covers. It
+inspects the fonts directly (it does not exercise the live render path), so it's
+handy for spotting font-name mismatches and gaps in your chain during
+development.
+
+[resolver]: https://github.com/facebook/react-native/blob/main/packages/react-native/ReactCommon/react/renderer/textlayoutmanager/platform/ios/react/renderer/textlayoutmanager/RCTFontUtils.h
 
 ## Contributing
 
