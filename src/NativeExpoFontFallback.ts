@@ -1,4 +1,4 @@
-import { TurboModuleRegistry, type TurboModule } from 'react-native';
+import { Platform, TurboModuleRegistry, type TurboModule } from 'react-native';
 
 /**
  * Native TurboModule surface. Kept deliberately small and codegen-friendly:
@@ -33,4 +33,23 @@ export interface Spec extends TurboModule {
   checkText(text: string, baseFamily: string): string;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('ExpoFontFallback');
+/**
+ * Web stub. There is no native font-fallback engine on web — the browser
+ * handles fallback via the CSS `font-family` cascade — so the runtime API
+ * degrades to inert no-ops. Resolving via `Platform.OS` (rather than a separate
+ * `.web` file) keeps this working after `react-native-builder-bob` rewrites the
+ * import in `index.tsx` to an explicit `.js` extension, which would otherwise
+ * defeat Metro's `.web` platform-extension resolution and crash the web bundle
+ * at import time in `TurboModuleRegistry.getEnforcing`.
+ */
+const WebExpoFontFallback: Spec = {
+  install: () => false,
+  isInstalled: () => false,
+  getConfigJSON: () => '{"chains":{}}',
+  checkText: (_text: string, baseFamily: string) =>
+    JSON.stringify({ baseFamily, missingCodepoints: [], coveredBy: {} }),
+};
+
+export default Platform.OS === 'web'
+  ? WebExpoFontFallback
+  : TurboModuleRegistry.getEnforcing<Spec>('ExpoFontFallback');

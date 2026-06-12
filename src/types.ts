@@ -61,6 +61,15 @@ export type FontFallbackPluginConfig = {
      * component instead.
      */
     interceptReactNativeFontResolver?: boolean;
+    /**
+     * Font file names (with or without extension, e.g. `noto-sans` or
+     * `noto-sans.ttf`) that another plugin already bundles into the iOS app
+     * (e.g. `expo-font`). These fonts are still used for chain and name
+     * resolution, but this plugin will not copy them or add them to the Xcode
+     * resources build phase — doing so produces a second `CpResource` for the
+     * same output file and fails the build with "Multiple commands produce …".
+     */
+    skipBundlingFonts?: string[];
   };
 
   dev?: {

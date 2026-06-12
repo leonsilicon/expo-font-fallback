@@ -13,6 +13,14 @@ export type ResolvedFont = {
   postScriptName: string;
   /** The name used as the logical identifier in `chains` (the file base name). */
   logicalName: string;
+  /**
+   * Whether this plugin should bundle the font (copy it into the project and add
+   * it as an Xcode/Gradle resource). `false` for fonts already shipped by
+   * another plugin — they are still used for chain/name resolution but not
+   * re-bundled, which would otherwise collide at build time. See
+   * `ios.skipBundlingFonts`.
+   */
+  bundle: boolean;
 };
 
 export type ResolvedConfig = {
@@ -47,6 +55,15 @@ export function resolveConfig(
   const fonts: ResolvedFont[] = [];
   const byLogicalName = new Map<string, ResolvedFont>();
 
+  // Fonts the host already bundles via another plugin — reference-only here.
+  // Entries may be given with or without extension (e.g. `noto-sans` or
+  // `noto-sans.ttf`); both forms are matched.
+  const skipBundling = new Set(
+    (config.ios?.skipBundlingFonts ?? []).map((name) =>
+      name.replace(/\.(ttf|otf)$/i, '')
+    )
+  );
+
   for (const rel of config.fonts) {
     const sourcePath = path.resolve(projectRoot, rel);
     const ext = path.extname(sourcePath).toLowerCase();
@@ -74,6 +91,7 @@ export function resolveConfig(
       ext,
       postScriptName,
       logicalName: fileBaseName,
+      bundle: !skipBundling.has(fileBaseName),
     };
 
     if (byLogicalName.has(resolved.logicalName)) {
