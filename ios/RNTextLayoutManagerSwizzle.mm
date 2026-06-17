@@ -53,7 +53,14 @@ static NSAttributedString *FFApplyCascades(NSAttributedString *input) {
                      return;
                    }
                    UIFont *wrapped = [registry cascadeFontForFont:font];
-                   if (wrapped == nil || wrapped == font) {
+                   // Only substitute a genuinely resolved replacement. A nil (no
+                   // chain / unresolved) or identity result means "leave the
+                   // original untouched". Writing a malformed font into the
+                   // attributed string would surface as a crash later in the
+                   // draw path, so the registry must only ever return a real
+                   // UIFont here — but we re-assert it defensively regardless.
+                   if (wrapped == nil || wrapped == font ||
+                       ![wrapped isKindOfClass:[UIFont class]]) {
                      return;
                    }
                    if (result == nil) {

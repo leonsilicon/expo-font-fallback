@@ -180,10 +180,32 @@ public final class FontFallbackRegistry: NSObject {
 
     let result = fallbacks.isEmpty ? base : base.addingFallbackCascade(fallbacks)
 
+    // Final safety gate before handing the font back to React Native. RN's
+    // `RCTDefaultFontWithFontProperties` re-resolves whatever we return through
+    // `+[UIFont fontWithDescriptor:size:]` after adding a synthetic italic or
+    // condensed trait, then stores the result into an `NSCache` WITHOUT a nil
+    // check — a `nil` there raises `NSInvalidArgumentException` and aborts the
+    // app mid-draw. Returning `nil` from this resolver is safe (RN falls through
+    // to `RCTGetLegacyDefaultFont` and then `+[UIFont systemFontOfSize:weight:]`,
+    // RCTFontUtils.mm:285,289), so if our font would not survive that
+    // re-resolution we yield `nil` instead of crashing the host app.
+    guard fontSurvivesReactNativeReResolution(result) else {
+      return nil
+    }
+
     lock.lock()
     cache[key] = result
     lock.unlock()
     return result
+  }
+
+  /// True only if `font` will survive React Native's post-resolution trait
+  /// augmentation without producing a `nil` font that RN then stores into its
+  /// unguarded `NSCache` (aborting the app). Shares the single source of truth
+  /// in `UIFont.reResolutionIsSafe` so the resolver and the cascade-attach path
+  /// validate identically.
+  private func fontSurvivesReactNativeReResolution(_ font: UIFont) -> Bool {
+    UIFont.reResolutionIsSafe(descriptor: font.fontDescriptor, size: font.pointSize)
   }
 
   /// Build a font in `family` at the given size, weight and italic. Falls back
