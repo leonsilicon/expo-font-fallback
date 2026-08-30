@@ -37,6 +37,24 @@ export type FontFallbackPluginConfig = {
   defaultFamily?: string;
 
   /**
+   * Multi-weight families keyed by the DISPLAY family name — the string JS
+   * passes as `fontFamily` (e.g. `"Han Composite"`). `faces` lists the logical
+   * font names (file base names, all of which must be in
+   * {@link FontFallbackPluginConfig.fonts}) that make up the family; each
+   * face's weight and italic are read from its file. `chain` lists logical
+   * names to fall back to for glyphs a face lacks.
+   *
+   * Android registers ONE cascaded `Typeface` per family that carries every
+   * face, so `fontWeight` selects the real face and missing glyphs walk the
+   * chain — a plain {@link FontFallbackPluginConfig.chains chains} entry is
+   * built from a single file and can do neither. iOS resolves the family
+   * through CoreText and applies the per-face `chains`, so `families` only
+   * validates the names there. {@link FontFallbackPluginConfig.defaultFamily}
+   * may name a `families` key.
+   */
+  families?: Record<string, { faces: string[]; chain?: string[] }>;
+
+  /**
    * Optional explicit mapping from a font file path to its platform font
    * names. Use this when the PostScript name baked into the font differs from
    * the file name (e.g. `NotoSansSC-Regular.otf` whose PostScript name is

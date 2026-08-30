@@ -148,6 +148,47 @@ An explicit `fontFamily` on a `<Text>` always takes precedence.
 > (`Typeface.CustomFallbackBuilder`). On older devices bare `<Text>` keeps the
 > system font; explicit per-`fontFamily` chains still apply.
 
+### Multi-weight families
+
+A `chains` entry is built from ONE font file, so on Android a chain base has a
+single weight: `fontWeight: '100'` renders the base file's outlines and bold is
+synthesised. When your family ships several weight files, declare it under
+`families`, keyed by the **display name** JS passes as `fontFamily`:
+
+```ts
+withFontFallback({
+  fonts: [
+    './public/fonts/han-composite.ttf',        // Regular, the full font
+    './public/fonts/han-composite-thin.ttf',   // Thin
+    './public/fonts/han-composite-bold.ttf',   // Bold, Latin only
+    './public/fonts/last-resort.ttf',
+  ],
+  chains: {
+    // Per-face chains (iOS keys these by PostScript name): faces that lack a
+    // glyph fall back to the full Regular face.
+    'han-composite-thin': ['han-composite', 'last-resort'],
+    'han-composite-bold': ['han-composite', 'last-resort'],
+    'han-composite': ['last-resort'],
+  },
+  families: {
+    'Han Composite': {
+      faces: ['han-composite-thin', 'han-composite', 'han-composite-bold'],
+      chain: ['han-composite', 'last-resort'],
+    },
+  },
+  defaultFamily: 'Han Composite',
+});
+```
+
+`faces` and `chain` are logical font names (file base names, all listed in
+`fonts`); each face's weight and italic are read from its file. Android
+registers one cascaded `Typeface` under the display name that carries every
+face — `fontWeight` selects the real face and glyphs a face lacks walk the
+chain — and uses it as the process default when `defaultFamily` names the
+family. iOS resolves the family through CoreText from the bundled faces' name
+tables and attaches each face's `chains` entry, so `families` only validates
+the names there.
+
 ### API
 
 ```ts
@@ -246,6 +287,43 @@ A few non-obvious things worth knowing:
   up to 64 fallback families; entries beyond that are skipped with a warning.
 - **`install()` should run before your first render** so the chains — and the
   Android default-font shim — are in place before anything mounts.
+
+## Avoiding duplicate font files
+
+If another plugin already ships a font into your app, you can tell this plugin not to bundle its
+own copy. The font is still used for chain and name resolution — only the duplicate file is
+skipped.
+
+This matters most alongside [`expo-font`](https://docs.expo.dev/versions/latest/sdk/font/), which
+writes every registered face into `res/font/` on Android and into the app bundle on iOS. Without
+this, each shared face ships **twice**, which is easy to miss and expensive for multi-megabyte CJK
+fonts.
+
+```js
+[
+  'expo-font-fallback',
+  {
+    fonts: ['./assets/fonts/noto-sans.ttf', './assets/fonts/noto-sans-sc.ttf'],
+    chains: { 'noto-sans': ['noto-sans-sc'] },
+    // Both platforms are configured independently.
+    ios: { skipBundlingFonts: ['noto-sans.ttf', 'noto-sans-sc.ttf'] },
+    android: { skipBundlingFonts: ['noto-sans.ttf', 'noto-sans-sc.ttf'] },
+  },
+]
+```
+
+Names may be given with or without the extension.
+
+**iOS** — required when another plugin bundles the same file, otherwise two `CpResource` commands
+write the same path and the build fails with *"Multiple commands produce …"*.
+
+**Android** — optional but recommended. Nothing fails without it; you just ship the bytes twice.
+When set, the font is not copied into `assets/fonts/` and the runtime loads it from `res/font/`
+instead. Android resource names replace hyphens with underscores (matching `expo-font`'s own
+naming), so `noto-sans-sc` resolves as `R.font.noto_sans_sc`.
+
+> Only skip a font that another plugin genuinely bundles for that platform. If nothing ships it,
+> the face cannot be found at runtime and its chain link is silently dropped.
 
 ## How it works under the hood
 

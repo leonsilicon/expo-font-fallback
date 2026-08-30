@@ -21,6 +21,13 @@ export type ResolvedFont = {
    * `ios.skipBundlingFonts`.
    */
   bundle: boolean;
+  /**
+   * The Android counterpart of {@link bundle}. `false` for fonts already shipped
+   * as an Android font resource by another plugin (e.g. `expo-font`'s
+   * `res/font/`) — they are not copied into `assets/fonts/`, and the runtime
+   * resolves them from resources instead. See `android.skipBundlingFonts`.
+   */
+  bundleAndroid: boolean;
 };
 
 export type ResolvedConfig = {
@@ -33,6 +40,11 @@ export type ResolvedConfig = {
   iosDefaultFamily?: string;
   /** Default family as a file base name (Android), if configured. */
   androidDefaultFamily?: string;
+  /**
+   * Multi-weight families keyed by display name, with faces and chain expressed
+   * in file base names — for Android. See `FontFallbackPluginConfig.families`.
+   */
+  androidFamilies: Record<string, { faces: string[]; chain: string[] }>;
 };
 
 const SUPPORTED_EXTS = new Set(['.ttf', '.otf']);
@@ -58,6 +70,11 @@ export function resolveConfig(
   // Fonts the host already bundles via another plugin — reference-only here.
   // Entries may be given with or without extension (e.g. `noto-sans` or
   // `noto-sans.ttf`); both forms are matched.
+  const skipBundlingAndroid = new Set(
+    (config.android?.skipBundlingFonts ?? []).map((name) =>
+      name.replace(/\.(ttf|otf)$/i, '')
+    )
+  );
   const skipBundling = new Set(
     (config.ios?.skipBundlingFonts ?? []).map((name) =>
       name.replace(/\.(ttf|otf)$/i, '')
@@ -92,6 +109,7 @@ export function resolveConfig(
       postScriptName,
       logicalName: fileBaseName,
       bundle: !skipBundling.has(fileBaseName),
+      bundleAndroid: !skipBundlingAndroid.has(fileBaseName),
     };
 
     if (byLogicalName.has(resolved.logicalName)) {
@@ -135,18 +153,53 @@ export function resolveConfig(
     );
   }
 
+  const androidFamilies: Record<string, { faces: string[]; chain: string[] }> =
+    {};
+  for (const [familyName, family] of Object.entries(config.families ?? {})) {
+    if (!family.faces?.length) {
+      throw new Error(
+        `[expo-font-fallback] Family "${familyName}" must list at least one face.`
+      );
+    }
+    const requireFont = (name: string, role: string) => {
+      const f = byLogicalName.get(name);
+      if (!f) {
+        throw new Error(
+          `[expo-font-fallback] ${role} "${name}" of family "${familyName}" is ` +
+            'not among the configured `fonts`.'
+        );
+      }
+      return f;
+    };
+    androidFamilies[familyName] = {
+      faces: family.faces.map((name) => requireFont(name, 'Face').fileBaseName),
+      chain: (family.chain ?? []).map(
+        (name) => requireFont(name, 'Chain entry').fileBaseName
+      ),
+    };
+  }
+
   let iosDefaultFamily: string | undefined;
   let androidDefaultFamily: string | undefined;
   if (config.defaultFamily != null) {
-    const defaultFont = byLogicalName.get(config.defaultFamily);
-    if (!defaultFont) {
-      throw new Error(
-        `[expo-font-fallback] defaultFamily "${config.defaultFamily}" is not ` +
-          'among the configured `fonts`. It must match a font file base name.'
-      );
+    if (androidFamilies[config.defaultFamily] != null) {
+      // A multi-weight family: both platforms resolve it by its display name
+      // (CoreText family matching on iOS; the registered cascaded Typeface on
+      // Android), so bare weighted text picks the real face.
+      iosDefaultFamily = config.defaultFamily;
+      androidDefaultFamily = config.defaultFamily;
+    } else {
+      const defaultFont = byLogicalName.get(config.defaultFamily);
+      if (!defaultFont) {
+        throw new Error(
+          `[expo-font-fallback] defaultFamily "${config.defaultFamily}" is not ` +
+            'among the configured `fonts` or `families`. It must match a font ' +
+            'file base name or a family name.'
+        );
+      }
+      iosDefaultFamily = defaultFont.postScriptName;
+      androidDefaultFamily = defaultFont.fileBaseName;
     }
-    iosDefaultFamily = defaultFont.postScriptName;
-    androidDefaultFamily = defaultFont.fileBaseName;
   }
 
   return {
@@ -155,6 +208,7 @@ export function resolveConfig(
     androidChains,
     iosDefaultFamily,
     androidDefaultFamily,
+    androidFamilies,
   };
 }
 

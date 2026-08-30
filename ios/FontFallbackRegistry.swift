@@ -159,7 +159,6 @@ public final class FontFallbackRegistry: NSObject {
       lock.unlock()
       return nil
     }
-    let fallbacks = chains[defaultFamily] ?? []
 
     let key = cacheKey(
       family: defaultFamily, size: size, weight: weight, italic: italic
@@ -177,6 +176,12 @@ public final class FontFallbackRegistry: NSObject {
       // Configured default family does not resolve to a registered font.
       return nil
     }
+
+    // A default configured as a multi-weight FAMILY (display name) has no chain of its own —
+    // its chains are keyed by each face's PostScript name — so look the resolved face up too.
+    lock.lock()
+    let fallbacks = chains[defaultFamily] ?? chains[base.fontName] ?? []
+    lock.unlock()
 
     let result = fallbacks.isEmpty ? base : base.addingFallbackCascade(fallbacks)
 
