@@ -194,7 +194,32 @@ public final class FontFallbackRegistry: NSObject {
     // to `RCTGetLegacyDefaultFont` and then `+[UIFont systemFontOfSize:weight:]`,
     // RCTFontUtils.mm:285,289), so if our font would not survive that
     // re-resolution we yield `nil` instead of crashing the host app.
-    guard fontSurvivesReactNativeReResolution(result) else {
+    //
+    // Relative, not absolute: a face with no italic/condensed variant fails the
+    // probe on its own merits (`base` already fails it), and bailing to nil
+    // there would drop the configured default family for every such font —
+    // including our CJK faces — rather than only when the CASCADE is what
+    // breaks re-resolution. Yield nil only when attaching the chain is the
+    // regression. Matching `addingFallbackCascade`, this is judged per trait.
+    guard UIFont.cascadeIsNonRegressive(
+      original: base.fontDescriptor,
+      candidate: result.fontDescriptor,
+      size: result.pointSize
+    ) else {
+      return nil
+    }
+
+    // Separately: RN takes its crashing branch only for an ITALIC (or condensed)
+    // request, and for that branch it re-resolves whatever we return. A face
+    // with no italic variant — every CJK face we ship — makes that re-resolution
+    // yield `nil` with or without a cascade, so the gate above (which is
+    // deliberately relative) cannot catch it. It is not a regression we cause,
+    // but we are the ones handing RN the font, so we decline the request rather
+    // than supply one we know aborts the app. Returning nil is safe here: RN
+    // falls through to its own system font, which does synthesise italic.
+    if italic, !UIFont.italicReResolutionIsSafe(
+      descriptor: result.fontDescriptor, size: result.pointSize
+    ) {
       return nil
     }
 
@@ -202,15 +227,6 @@ public final class FontFallbackRegistry: NSObject {
     cache[key] = result
     lock.unlock()
     return result
-  }
-
-  /// True only if `font` will survive React Native's post-resolution trait
-  /// augmentation without producing a `nil` font that RN then stores into its
-  /// unguarded `NSCache` (aborting the app). Shares the single source of truth
-  /// in `UIFont.reResolutionIsSafe` so the resolver and the cascade-attach path
-  /// validate identically.
-  private func fontSurvivesReactNativeReResolution(_ font: UIFont) -> Bool {
-    UIFont.reResolutionIsSafe(descriptor: font.fontDescriptor, size: font.pointSize)
   }
 
   /// Build a font in `family` at the given size, weight and italic. Falls back
